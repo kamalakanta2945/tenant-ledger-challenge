@@ -1,3 +1,4 @@
+from app.models import AuditLog
 from tests.conftest import headers
 from tests.test_transactions import transaction_payload
 
@@ -78,3 +79,28 @@ def test_reversal_preserves_history_and_reverses_balance(client):
         headers=headers("key-a"),
     )
     assert repeat.status_code == 409
+
+
+def test_reversal_is_preserved_in_audit_history(client, test_db):
+    created = client.post(
+        "/transactions",
+        headers=headers("key-a"),
+        json=transaction_payload(idempotency_key="audit-reversal"),
+    )
+    original_id = created.json()["id"]
+    client.post(
+        f"/transactions/{original_id}/reverse",
+        headers=headers("key-a"),
+    )
+
+    db, tenants = test_db
+    audit_rows = (
+        db.query(AuditLog)
+        .filter(AuditLog.tenant_id == tenants["a"].id)
+        .order_by(AuditLog.occurred_at)
+        .all()
+    )
+    actions = {row.action for row in audit_rows}
+    assert "CREATED" in actions
+    assert "REVERSAL_REQUESTED" in actions
+    assert "REVERSAL_CREATED" in actions
