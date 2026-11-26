@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ALLOWED_CURRENCIES = {"USD", "EUR", "GBP"}
 
@@ -34,12 +34,28 @@ class TransactionCreate(BaseModel):
             raise ValueError("transaction_date cannot be in the future")
         return value
 
+    @field_validator("amount")
+    @classmethod
+    def validate_two_decimal_places(cls, value: Decimal) -> Decimal:
+        if value.as_tuple().exponent < -2:
+            raise ValueError("amount must have no more than 2 decimal places")
+        return value
+
     @field_validator("related_client_ref")
     @classmethod
     def validate_related_ref(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("related_client_ref cannot be empty")
         return value
+
+    @model_validator(mode="after")
+    def validate_transfer_counterparty(self) -> "TransactionCreate":
+        if self.transaction_type == "TRANSFER":
+            if not self.related_client_ref:
+                raise ValueError("related_client_ref is required for TRANSFER")
+        elif self.related_client_ref is not None:
+            raise ValueError("related_client_ref is only valid for TRANSFER")
+        return self
 
 
 class TransactionRead(BaseModel):
